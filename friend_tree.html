@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光遇好友樹規劃器</title>
+
+<style>
+/* 基礎樣式 */
+body { font-family:"Segoe UI", sans-serif; background-color:#1e1e24; margin:0; padding:0; color:#eee; }
+header { text-align:center; background:linear-gradient(135deg,#2b5876,#4e4376); color:#fff; padding:12px 0; font-size:22px; font-weight:bold; letter-spacing:1px; box-shadow:0 2px 6px rgba(0,0,0,0.3); }
+
+/* 儀表板與控制區 */
+.dashboard { background-color: #2a2a35; padding: 15px; margin: 15px auto; width: 90%; max-width: 600px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+
+/* 多好友管理區 */
+.profile-section { display: flex; justify-content: center; align-items: center; gap: 10px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #444; }
+.profile-section select { padding: 6px; border-radius: 6px; background: #444; color: white; border: 1px solid #66a6ff; outline: none; }
+
+.totals { text-align:center; margin-bottom: 15px; font-size:14px; font-weight:500; color: #fff; }
+.totals span { color: #f39c12; font-weight: bold; font-size: 16px; margin-right: 15px; }
+
+.friendship-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+button { background-color:#66a6ff; color:white; border:none; border-radius:6px; padding:8px 12px; font-size:13px; cursor:pointer; transition:0.2s; font-weight: bold; }
+button:hover { background-color:#5597f0; transform:translateY(-2px); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+button:active { transform:translateY(1px); }
+.btn-reset { background-color: #e74c3c; }
+.btn-reset:hover { background-color: #c0392b; }
+.btn-preview { background-color: #9b59b6; }
+.btn-preview.active { background-color: #f1c40f; color: #333; box-shadow: 0 0 10px #f1c40f; }
+
+.hint-text { text-align: center; font-size: 12px; color: #aaa; margin-top: 10px; }
+
+/* 好友樹容器 (由下往上長) */
+#treeContainer { 
+    display:flex; 
+    flex-direction:column-reverse; 
+    align-items:center; 
+    gap: 20px; 
+    padding:20px; 
+    margin: 0 auto;
+    max-width: 800px;
+} 
+
+/* Tier 層級 */
+.tier-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    position: relative;
+    padding: 10px 0;
+    border-bottom: 1px dashed #555; 
+}
+.tier-label { font-size: 12px; color: #888; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px; }
+
+/* 同一列物品 (最多三個) */
+.items-row { 
+    display:flex; 
+    justify-content: flex-start; /* 保持靠左對齊 */
+    gap: 15px; 
+    width: 288px; /* ⬅️ 這裡！把 100% 改成 288px */
+    margin-bottom: 10px; /* (可選) 加一點上下間距讓排版更好看 */
+}
+
+/* 單個動作節點 */
+.item { 
+    width:70px; 
+    text-align:center; cursor:pointer; 
+    border:2px solid #555; border-radius:12px; 
+    padding:6px; 
+    transition:0.3s; 
+    background-color:#333; 
+    position: relative;
+    user-select: none; 
+}
+.item:hover { border-color:#66a6ff; transform: scale(1.05); }
+.item.unlocked { border-color:#f39c12; background-color:#4a3b22; }
+.item.locked { opacity: 0.7; filter: grayscale(50%); }
+
+.item img { width:100%; height:auto; border-radius:8px; margin-bottom: 4px; pointer-events: none; }
+.item-name { font-size:11px; font-weight:bold; line-height:1.2; margin-bottom: 2px; }
+.item-cost { font-size:10px; color: #aaa; }
+.item.unlocked .item-cost { color: #f39c12; }
+
+.cost-indicator { display: inline-block; width: 8px; height: 8px; background-color: #f39c12; border-radius: 50%; margin-right: 3px; }
+
+</style>
+</head>
+<body>
+
+<header>光遇好友樹規劃器</header>
+
+<div class="dashboard">
+    <div class="profile-section">
+        <select id="profileSelect" onchange="switchProfile()"></select>
+        <button onclick="addProfile()">➕ 新增好友</button>
+        <button class="btn-reset" onclick="deleteProfile()" style="padding: 6px; font-size: 11px;">刪除當前</button>
+    </div>
+
+    <div class="totals">
+        總好感度: <span id="totalAffection">0</span>
+        已花費蠟燭: <span id="totalCandleSpent">0</span> 
+    </div>
+    
+    <div class="friendship-actions">
+        <button onclick="addAffection(1)">點火 (+1)</button>
+        <button onclick="addAffection(5)">送心 (+5)</button>
+        <button onclick="addAffection(10)">禮包 (+10)</button>
+        <button id="btnPreview" class="btn-preview" onclick="togglePreview()">👀 全解鎖對比版</button>
+        <button class="btn-reset" onclick="resetCurrentTree()">重置樹</button>
+    </div>
+    <div class="hint-text">💡 提示：在未解鎖的圖示上 <b>點擊右鍵 (手機長按)</b> 可計算解鎖目標花費</div>
+</div>
+
+<div id="treeContainer"></div>
+
+<script>
+// ==========================================
+// ⚙️ 設定區：在這裡定義每個 Tier 需要的總好感度
+// ==========================================
+const TIER_REQ_EXP = {
+    1: 0,
+    2: 10,   // 解鎖 Tier 2 需要 20 點好感度
+    3: 40,
+    4: 70,
+    5: 120,
+    6: 240,
+    7: 440
+};
+
+let items = [];
+let affection = 0;
+const AFFECTION_PER_UNLOCK = 10;
+
+// 多好友管理狀態
+let profiles = JSON.parse(localStorage.getItem('friendProfiles')) || [{ id: 'friend_default', name: '預設好友' }];
+let currentProfileId = localStorage.getItem('currentProfileId') || profiles[0].id;
+let isPreviewMode = false;
+
+initApp();
+
+function initApp() {
+    updateProfileDropdown();
+    
+    fetch('friend_tree.json')
+    .then(resp=>resp.json())
+    .then(data=>{
+        const treeData = data["FriendTree"].items;
+        items = treeData.map(item => ({
+            ...item,
+            baseKey: `action_${item.actionId}_lv${item.level}`
+        }));
+        
+        loadCurrentProfileData();
+    }).catch(err=>{
+        console.error("載入 JSON 失敗：", err);
+        document.getElementById('treeContainer').innerHTML = "<p style='text-align:center; color:red;'>錯誤：無法載入物品資料。請確保 data/items.json 存在。</p>";
+    });
+}
+
+// ---------------- 檔案管理與存檔邏輯 ----------------
+
+function updateProfileDropdown() {
+    const select = document.getElementById('profileSelect');
+    select.innerHTML = '';
+    profiles.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.id;
+        option.textContent = p.name;
+        if (p.id === currentProfileId) option.selected = true;
+        select.appendChild(option);
+    });
+}
+
+function switchProfile() {
+    if (isPreviewMode) togglePreview(); 
+    currentProfileId = document.getElementById('profileSelect').value;
+    localStorage.setItem('currentProfileId', currentProfileId);
+    loadCurrentProfileData();
+}
+
+function addProfile() {
+    const name = prompt('請輸入好友暱稱：');
+    if (name && name.trim() !== '') {
+        const newId = 'friend_' + Date.now();
+        profiles.push({ id: newId, name: name.trim() });
+        localStorage.setItem('friendProfiles', JSON.stringify(profiles));
+        currentProfileId = newId;
+        localStorage.setItem('currentProfileId', currentProfileId);
+        updateProfileDropdown();
+        loadCurrentProfileData();
+    }
+}
+
+function deleteProfile() {
+    if (profiles.length <= 1) return alert('至少要保留一位好友喔！');
+    if (confirm(`確定要刪除當前好友的所有紀錄嗎？`)) {
+        localStorage.removeItem(`${currentProfileId}_affection`);
+        items.forEach(i => localStorage.removeItem(`${currentProfileId}_${i.baseKey}`));
+
+        profiles = profiles.filter(p => p.id !== currentProfileId);
+        currentProfileId = profiles[0].id;
+        localStorage.setItem('friendProfiles', JSON.stringify(profiles));
+        localStorage.setItem('currentProfileId', currentProfileId);
+        updateProfileDropdown();
+        loadCurrentProfileData();
+    }
+}
+
+function loadCurrentProfileData() {
+    affection = parseInt(localStorage.getItem(`${currentProfileId}_affection`)) || 0;
+    items.forEach(i => {
+        i.unlocked = JSON.parse(localStorage.getItem(`${currentProfileId}_${i.baseKey}`) || "false");
+    });
+    updateUI();
+}
+
+function saveState(){
+    if (isPreviewMode) return; 
+    items.forEach(i => localStorage.setItem(`${currentProfileId}_${i.baseKey}`, i.unlocked));
+    localStorage.setItem(`${currentProfileId}_affection`, affection);
+}
+
+// ---------------- 核心操作邏輯 ----------------
+
+function addAffection(amount) {
+    if (isPreviewMode) return alert('預覽模式下無法操作，請先關閉。');
+    affection += amount;
+    saveState();
+    updateUI();
+}
+
+function togglePreview() {
+    isPreviewMode = !isPreviewMode;
+    const btn = document.getElementById('btnPreview');
+    if (isPreviewMode) {
+        btn.classList.add('active');
+        btn.textContent = '🔙 退出預覽模式';
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = '👀 全解鎖對比版';
+    }
+    updateUI();
+}
+
+function calcTotals(){
+    let totalCandleSpent = 0;
+    items.forEach(i=>{
+        if(i.unlocked){
+            totalCandleSpent += (parseInt(i.cst) || 0);
+        }
+    });
+    return totalCandleSpent;
+}
+
+// ---------------- UI 渲染邏輯 ----------------
+
+function updateUI(){
+    const displayAffection = isPreviewMode ? "MAX" : affection;
+    const displayCandles = isPreviewMode ? "MAX" : calcTotals();
+
+    document.getElementById('totalAffection').textContent = displayAffection;
+    document.getElementById('totalCandleSpent').textContent = displayCandles;
+
+    const container = document.getElementById('treeContainer');
+    container.innerHTML = '';
+
+    // 1. 找出每個動作目前「最高已解鎖的等級」
+    const actionMaxUnlocked = {};
+    items.forEach(i => {
+        if (!actionMaxUnlocked[i.actionId]) actionMaxUnlocked[i.actionId] = 0;
+        
+        const isConsideredUnlocked = isPreviewMode ? true : i.unlocked;
+        if (isConsideredUnlocked && i.level > actionMaxUnlocked[i.actionId]) {
+            actionMaxUnlocked[i.actionId] = i.level;
+        }
+    });
+
+    // 2. 決定哪些節點要顯示 (隱藏舊等級，只留最高解鎖或下一級)
+    let visibleItems = items.filter(i => {
+        if (isPreviewMode) {
+            const maxLvl = Math.max(...items.filter(item => item.actionId === i.actionId).map(item => item.level));
+            return i.level === maxLvl;
+        }
+
+        const currentMax = actionMaxUnlocked[i.actionId] || 0;
+        if (currentMax === 0) {
+            return i.level === 1; // 都沒解鎖就顯示基礎 Lv1
+        } else {
+            return i.level === currentMax || i.level === currentMax + 1;
+        }
+    });
+
+    // 3. 依照 Tier 分組
+    const tierGroups = {};
+    visibleItems.forEach(i => {
+        if(!tierGroups[i.tier]) tierGroups[i.tier] = [];
+        tierGroups[i.tier].push(i);
+    });
+
+    // 4. 渲染 UI
+    Object.keys(tierGroups).sort((a,b)=> a - b).forEach(tierLv => {
+        const tierRow = document.createElement('div');
+        tierRow.className = 'tier-row';
+        
+        // 顯示該 Tier 及其需求好感度
+        const reqExpForTier = TIER_REQ_EXP[tierLv] || 0;
+        const label = document.createElement('div');
+        label.className = 'tier-label';
+        label.textContent = `— Tier ${tierLv} (需 ${reqExpForTier} 好感) —`;
+        tierRow.appendChild(label); // 標籤放在該 Tier 的最上方
+
+        // 【重點修改】動態排序與分列邏輯
+        // 先把該層的所有可見物品依 order 排序 (由小到大)
+        const sortedItems = tierGroups[tierLv].sort((a,b) => a.order - b.order);
+
+        // 將物品切割成每 3 個一組 (chunk)
+        const chunks = [];
+        for(let i = 0; i < sortedItems.length; i += 3) {
+            chunks.push(sortedItems.slice(i, i + 3));
+        }
+
+        // 因為樹是往上長的，所以最後一組 (order 較大的) 要先加進 DOM，才會在畫面的較上方
+        for(let i = chunks.length - 1; i >= 0; i--) {
+            const itemsRow = document.createElement('div');
+            itemsRow.className = 'items-row';
+
+            // 同一列內的物品依然依照 order (左到右) 排序放入
+            chunks[i].forEach(item => {
+                const itemDiv = createItemDiv(item, actionMaxUnlocked[item.actionId]);
+                itemsRow.appendChild(itemDiv);
+            });
+            tierRow.appendChild(itemsRow);
+        }
+
+        container.appendChild(tierRow);
+    });
+}
+
+function createItemDiv(item, currentMaxLevel){
+    const div = document.createElement('div');
+    const isVisuallyUnlocked = isPreviewMode ? true : item.unlocked;
+    div.className = `item ${isVisuallyUnlocked ? 'unlocked' : 'locked'}`;
+
+    // 根據 Tier 取得該動作的解鎖門檻
+    const requiredAffection = TIER_REQ_EXP[item.tier] || 0;
+    
+    const costDisplay = isVisuallyUnlocked 
+        ? `Lv.${item.level}` 
+        : `<span class="cost-indicator"></span> ${item.cst}`;
+
+    div.innerHTML = `
+        <img src="${item.image}" alt="${item.nm}" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI1MCIgaGVpZ2h0PSI1MCI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzQ0NCIvPjwvc3ZnPg=='">
+        <div class="item-name">${item.nm}</div>
+        <div class="item-cost">${costDisplay}</div>
+    `;
+
+    // 左鍵點擊：解鎖/取消解鎖
+    div.addEventListener('click', ()=>{
+        if (isPreviewMode) return; 
+
+        if(!item.unlocked) {
+            if(item.level === currentMaxLevel + 1) {
+                if (affection >= requiredAffection) {
+                    item.unlocked = true;
+                    affection += AFFECTION_PER_UNLOCK;
+                    saveState();
+                    updateUI();
+                } else {
+                    alert(`【好感度不足】\n開啟 Tier ${item.tier} 區域需要 ${requiredAffection} 點好感度。\n您目前只有 ${affection} 點。`);
+                }
+            } else {
+                alert('請先解鎖前一級的動作！');
+            }
+        } else {
+            // 取消特定解鎖 (只取消當前點擊的這一級)
+            if(confirm(`確定要取消解鎖「${item.nm} Lv.${item.level}」嗎？\n(這將會退回解鎖獲得的 10 點好感度)`)){
+                item.unlocked = false;
+                affection -= AFFECTION_PER_UNLOCK;
+                if(affection < 0) affection = 0;
+                saveState();
+                updateUI();
+            }
+        }
+    });
+
+    // 右鍵/長按：目標計算
+    div.addEventListener('contextmenu', (e) => {
+        e.preventDefault(); 
+        if (isPreviewMode || item.unlocked) return;
+
+        let costCandles = 0;
+        let levelsToUnlock = [];
+        
+        items.forEach(i => {
+            if (i.actionId === item.actionId && i.level <= item.level && !i.unlocked) {
+                costCandles += parseInt(i.cst) || 0;
+                levelsToUnlock.push(`Lv.${i.level}`);
+            }
+        });
+
+        const diffAffection = Math.max(0, requiredAffection - affection);
+        
+        alert(
+            `🎯 【目標計算：${item.nm} Lv.${item.level}】\n\n` +
+            `👉 需要依序解鎖：${levelsToUnlock.join(', ')}\n` +
+            `🕯️ 總共需要準備蠟燭：${costCandles} 根\n` +
+            `💖 目標好感度：${requiredAffection} (您還差 ${diffAffection} 點好感度)`
+        );
+    });
+
+    return div;
+}
+
+function resetCurrentTree(){
+    if (isPreviewMode) return alert('請先關閉預覽模式再重置。');
+    if(confirm(`確定要重置【${profiles.find(p=>p.id===currentProfileId).name}】的整棵好友樹進度嗎？`)){
+        items.forEach(i => i.unlocked = false);
+        affection = 0;
+        saveState();
+        updateUI();
+    }
+}
+</script>
+</body>
+</html>
